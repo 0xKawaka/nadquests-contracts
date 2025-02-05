@@ -22,6 +22,9 @@ contract Badges is
     // Mapping to track which users have minted which NFT types
     mapping(uint256 => mapping(address => bool)) private _hasMinted;
 
+    // Mapping to track which Twitter IDs have minted each NFT type
+    mapping(uint256 => mapping(string => bool)) private _hasMintedTwitter;
+
     // Address that is allowed to sign keys, replace with your own logic or remove
     address public trustedAuthority;
 
@@ -32,8 +35,8 @@ contract Badges is
     ///      Must be called exactly once.
     function initialize(address _trustedAuthority, address _owner) public initializer {
         __ERC1155_init("");        // Initialize ERC1155
-        __Ownable_init(_owner);          // Initialize Ownable
-        __UUPSUpgradeable_init();  // Initialize UUPS
+        __Ownable_init(_owner);     // Initialize Ownable
+        __UUPSUpgradeable_init();   // Initialize UUPS
 
         // Set your trusted authority (or remove if not needed)
         trustedAuthority = _trustedAuthority;
@@ -48,22 +51,44 @@ contract Badges is
         emit NewNFTTypeAdded(tokenType, metadataURI);
     }
 
-    /// @dev Mint an NFT of a specific type using a valid key
+    /// @dev Mint an NFT of a specific type using a valid key and a Twitter ID.
+    ///      A given Twitter ID can only mint one NFT of each token type.
     function mintNFT(
         uint256 tokenType,
         bytes32 key,
+        string memory twitterId,
         bytes memory signature
     ) external {
         require(!_usedKeys[tokenType][key], "Key already used");
-        require(!_hasMinted[tokenType][msg.sender], "Already minted this type");
-        require(_verifyKey(msg.sender, tokenType, key, signature), "Invalid key");
+        require(!_hasMinted[tokenType][msg.sender], "User already minted this type");
+        require(!_hasMintedTwitter[tokenType][twitterId], "Twitter ID already minted this type");
+        require(_verifyKey(msg.sender, tokenType, key, twitterId, signature), "Invalid key");
 
-        _usedKeys[tokenType][key] = true;         // Mark the key as used
-        _hasMinted[tokenType][msg.sender] = true; // Mark the user as minted
-        _mint(msg.sender, tokenType, 1, "");      // Mint the NFT
+        _usedKeys[tokenType][key] = true;               // Mark the key as used
+        _hasMinted[tokenType][msg.sender] = true;         // Mark the user as minted
+        _hasMintedTwitter[tokenType][twitterId] = true;   // Mark the Twitter ID as minted
+        _mint(msg.sender, tokenType, 1, "");              // Mint the NFT
     }
 
-    /// @dev Override the URI function to return dynamic metadata based on the NFT type
+    /// @dev Check if a user has minted an NFT of a given type.
+    function hasMinted(uint256 tokenType, address user)
+        external
+        view
+        returns (bool)
+    {
+        return _hasMinted[tokenType][user];
+    }
+
+    /// @dev Check if a Twitter ID has minted an NFT of a given type.
+    function hasMintedTwitter(uint256 tokenType, string memory twitterId)
+        external
+        view
+        returns (bool)
+    {
+        return _hasMintedTwitter[tokenType][twitterId];
+    }
+
+    /// @dev Override the URI function to return dynamic metadata based on the NFT type.
     function uri(uint256 tokenType)
         public
         view
@@ -73,28 +98,29 @@ contract Badges is
         return _tokenURIs[tokenType];
     }
 
-    /// @dev Verify the key using a cryptographic signature
+    /// @dev Verify the key using a cryptographic signature that now also embeds a Twitter ID.
     function _verifyKey(
         address user,
         uint256 tokenType,
         bytes32 key,
+        string memory twitterId,
         bytes memory signature
     ) internal view returns (bool) {
-        // Example: Include user address, tokenType, key
-        // If you also want chain uniqueness, you can add block.chainid
+        // Include user address, tokenType, key, and twitterId in the signed message.
+        // You can also include chain id (or other parameters) if desired.
         bytes32 messageHash = keccak256(abi.encodePacked(
             user,
             tokenType,
-            key
-            // block.chainid
+            key,
+            twitterId
+            // block.chainid  // Optionally include chain id for uniqueness across chains.
         ));
 
         address signer = recoverSigner(messageHash, signature);
         return (signer == trustedAuthority);
     }
 
-
-    /// @dev Helper function to recover the signer's address
+    /// @dev Helper function to recover the signer's address from a message hash and signature.
     function recoverSigner(bytes32 messageHash, bytes memory signature)
         internal
         pure
@@ -107,7 +133,7 @@ contract Badges is
         return ecrecover(ethSignedMessageHash, v, r, s);
     }
 
-    /// @dev Helper function to split the signature into v, r, s components
+    /// @dev Helper function to split the signature into v, r, s components.
     function splitSignature(bytes memory sig)
         internal
         pure
@@ -129,7 +155,7 @@ contract Badges is
         return (v, r, s);
     }
 
-    /// @dev UUPS upgradeability: authorize upgrades to the contract (only owner)
+    /// @dev UUPS upgradeability: authorize upgrades to the contract (only owner).
     function _authorizeUpgrade(address newImplementation)
         internal
         override
